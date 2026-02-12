@@ -1,6 +1,7 @@
 import threading
 import time
 import pytest
+import yaml
 
 from src.testing.ammeter_framework import AmmeterTestFramework
 from Ammeters.Greenlee_Ammeter import GreenleeAmmeter
@@ -45,11 +46,6 @@ def test_run_test_collects_measurements_and_stats(framework, ammeter_type):
         assert key in stats
         assert isinstance(stats[key], (int, float))
 
-
-import yaml
-import pytest
-from src.testing.ammeter_framework import AmmeterTestFramework
-from Ammeters.client import request_current_from_ammeter
 
 def test_missing_sampling_params_raises(tmp_path):
     cfg = {
