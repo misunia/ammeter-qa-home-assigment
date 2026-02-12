@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional, Callable
 from src.utils.config import load_config
 
 
+# Injectable "measurement function" so the framework stays generic and testable.
+# It can be the real socket client, a stub, or any other backend.
 MeasurementFn = Callable[[int, bytes], float]
 
 
@@ -30,12 +32,17 @@ class AmmeterTestFramework:
         save: bool = True,
     ) -> Dict[str, Any]:
         """
-        Run a sampling session for a given ammeter type and return result dict.
+        Run a sampling session for a given ammeter type and return a result dict.
+
+        Supports both:
+        - count-based sampling (measurements_count)
+        - time-based sampling (total_duration_seconds + sampling_frequency_hz)
         """
         am_cfg = self._get_ammeter_cfg(ammeter_type)
         port = int(am_cfg["port"])
         command = am_cfg["command"].encode("utf-8") if isinstance(am_cfg["command"], str) else am_cfg["command"]
 
+        # Allow config-driven defaults, while still letting callers override per run.
         sampling_defaults = (self.config.get("testing", {})
                                .get("sampling", {}))
 
@@ -91,14 +98,14 @@ class AmmeterTestFramework:
 
         return result
 
-    # -------- internal helpers --------
+
 
     def _get_ammeter_cfg(self, ammeter_type: str) -> Dict[str, Any]:
         try:
             return self.config["ammeters"][ammeter_type]
         except KeyError as e:
             available = ", ".join(sorted(self.config.get("ammeters", {}).keys()))
-            raise KeyError(f"Unknown ammeter_type={ammeter_type!r}. Available: {available}")
+            raise KeyError(f"Unknown ammeter_type={ammeter_type!r}. Available: {available}") from e
 
     def _validate_sampling_args(
         self,
@@ -107,6 +114,7 @@ class AmmeterTestFramework:
         total_duration_seconds: Optional[float],
         sampling_frequency_hz: Optional[float],
     ) -> None:
+        # Either measurements_count OR (duration + frequency) must be provided.
         if measurements_count is not None:
             if measurements_count <= 0:
                 raise ValueError("measurements_count must be > 0")
@@ -139,11 +147,13 @@ class AmmeterTestFramework:
             timestamps.append(ts)
             measurements.append(val)
 
+        # Count-based sampling: take N samples as fast as the backend responds.
         if measurements_count is not None:
             for _ in range(measurements_count):
                 take_one()
             return measurements, timestamps
 
+        # Time-based sampling: aim for a given cadence (best-effort).
         period = 1.0 / float(sampling_frequency_hz)
         end_time = time.time() + float(total_duration_seconds)
 
@@ -151,7 +161,7 @@ class AmmeterTestFramework:
             t0 = time.time()
             take_one()
 
-            # best-effort cadence (not real-time, but stable enough)
+            # Best-effort cadence (not real-time accurate, but stable enough for QA sampling).
             elapsed = time.time() - t0
             sleep_for = period - elapsed
             if sleep_for > 0:
